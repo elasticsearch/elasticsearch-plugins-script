@@ -20,7 +20,6 @@ import shutil
 import os
 import datetime
 import argparse
-import github3
 import smtplib
 import subprocess
 import sys
@@ -32,6 +31,7 @@ from email.mime.text import MIMEText
 
 from os.path import dirname, abspath
 from logger import logger
+from github import github
 
 """
  This tool builds a release from the a given elasticsearch plugin branch.
@@ -82,6 +82,7 @@ DEV_TOOLS_DIR = ROOT_DIR + '/plugin_tools'
 
 # console colors
 OKGREEN = '\033[92m'
+OKWARN = '\033[93m'
 ENDC = '\033[0m'
 FAIL = '\033[91m'
 
@@ -477,39 +478,6 @@ def publish_artifacts(artifacts, base='elasticsearch/elasticsearch', dry_run=Tru
 # Email and Github Management
 #
 ##########################################################
-# Create a Github repository instance to access issues
-def get_github_repository(reponame,
-                          login=env.get('GITHUB_LOGIN', None),
-                          password=env.get('GITHUB_PASSWORD', None),
-                          key=env.get('GITHUB_KEY', None)):
-    if login:
-        g = github3.login(login, password)
-    elif key:
-        g = github3.login(token=key)
-    else:
-        g = github3.GitHub()
-
-    return g.repository("elastic", reponame)
-
-
-# Check if there are some remaining open issues and fails
-def check_opened_issues(version, repository, reponame):
-    opened_issues = [i for i in repository.iter_issues(state='open', labels='%s' % version)]
-    if len(opened_issues) > 0:
-        raise NameError(
-            'Some issues [%s] are still opened. Check https://github.com/elasticsearch/%s/issues?labels=%s&state=open'
-            % (len(opened_issues), reponame, version))
-
-
-# List issues from github: can be done anonymously if you don't
-# exceed a given number of github API calls per day
-def list_issues(version,
-                repository,
-                severity='bug'):
-    issues = [i for i in repository.iter_issues(state='closed', labels='%s,%s' % (severity, version))]
-    return issues
-
-
 def read_email_template(format='html'):
     file_name = '%s/email_template.%s' % (DEV_TOOLS_DIR, format)
     logger.log('open email template %s' % file_name)
@@ -524,17 +492,17 @@ template_email_txt = read_email_template('txt')
 
 
 # Get issues from github and generates a Plain/HTML Multipart email
-def prepare_email(artifact_id, release_version, repository,
+def prepare_email(artifact_id, release_version,
                   artifact_name, artifact_description, project_url,
                   severity_labels_bug='bug',
                   severity_labels_update='update',
                   severity_labels_new='new',
                   severity_labels_doc='doc'):
     ## Get bugs from github
-    issues_bug = list_issues(release_version, repository, severity=severity_labels_bug)
-    issues_update = list_issues(release_version, repository, severity=severity_labels_update)
-    issues_new = list_issues(release_version, repository, severity=severity_labels_new)
-    issues_doc = list_issues(release_version, repository, severity=severity_labels_doc)
+    issues_bug = github.list_issues(release_version, severity=severity_labels_bug)
+    issues_update = github.list_issues(release_version, severity=severity_labels_update)
+    issues_new = github.list_issues(release_version, severity=severity_labels_new)
+    issues_doc = github.list_issues(release_version, severity=severity_labels_doc)
 
     ## Format content to plain text
     plain_issues_bug = format_issues_plain(issues_bug, 'Fix')
@@ -650,12 +618,6 @@ def check_s3_credentials():
             'Could not find "AWS_ACCESS_KEY_ID" / "AWS_SECRET_ACCESS_KEY" in the env variables please export in order to upload to S3')
 
 
-def check_github_credentials():
-    if not env.get('GITHUB_KEY', None) and not env.get('GITHUB_LOGIN', None):
-        logger.log(
-            'WARN: Could not find "GITHUB_LOGIN" / "GITHUB_PASSWORD" or "GITHUB_KEY" in the env variables. You could need it.')
-
-
 def check_email_settings():
     if not env.get('MAIL_SENDER', None):
         raise RuntimeError('Could not find "MAIL_SENDER"')
@@ -669,26 +631,36 @@ def check_command_exists(name, cmd):
         raise RuntimeError('Could not run command %s - please make sure it is installed' % (name))
 
 
-def run_and_print(text, run_function):
+def run_and_print(text, run_function, optional=False):
     try:
         print(text, end='')
         run_function()
         print(OKGREEN + 'OK' + ENDC)
     except RuntimeError:
-        print(FAIL + 'NOT OK' + ENDC)
+        if optional:
+            print(OKWARN + 'NOT PRESENT' + ENDC)
+        else:
+            print(FAIL + 'FAILED' + ENDC)
 
-def check_env_var(text, env_var):
+
+def check_env_var(text, env_var, optional=False):
     try:
         print(text, end='')
         env[env_var]
         print(OKGREEN + 'OK' + ENDC)
     except KeyError:
-        print(FAIL + 'NOT OK' + ENDC)
+        if optional:
+            print(OKWARN + 'NOT PRESENT' + ENDC)
+        else:
+            print(FAIL + 'FAILED' + ENDC)
 
 
 def check_environment_and_commandline_tools():
     check_env_var('Checking for AWS env configuration AWS_SECRET_ACCESS_KEY_ID...     ', 'AWS_SECRET_ACCESS_KEY')
     check_env_var('Checking for AWS env configuration AWS_ACCESS_KEY_ID...            ', 'AWS_ACCESS_KEY_ID')
+    check_env_var('Checking for Github env configuration GITHUB_LOGIN...              ', 'GITHUB_LOGIN', True)
+    check_env_var('Checking for Github env configuration GITHUB_PASSWORD...           ', 'GITHUB_PASSWORD', True)
+    check_env_var('Checking for Github env configuration GITHUB_KEY...                ', 'GITHUB_KEY', True)
     # check_env_var('Checking for SONATYPE env configuration SONATYPE_USERNAME...       ', 'SONATYPE_USERNAME')
     # check_env_var('Checking for SONATYPE env configuration SONATYPE_PASSWORD...       ', 'SONATYPE_PASSWORD')
     # check_env_var('Checking for GPG env configuration GPG_KEY_ID...                   ', 'GPG_KEY_ID')
@@ -759,8 +731,6 @@ if __name__ == '__main__':
                   % env.get('MAIL_TO', 'discuss%2Bannouncements@elastic.co'))
         input('Press Enter to continue...')
 
-    check_github_credentials()
-
     print(''.join(['-' for _ in range(80)]))
     print('Preparing Release from branch [%s] running tests: [%s] dryrun: [%s]' % (src_branch, run_tests, dry_run))
     print('  JAVA_HOME is [%s]' % JAVA_HOME)
@@ -828,8 +798,8 @@ if __name__ == '__main__':
         print('Building Release candidate')
         input('Press Enter to continue...')
         print('  Checking github issues')
-        repository = get_github_repository(artifact_id)
-        check_opened_issues(release_version, repository, artifact_id)
+        github.get_github_repository(artifact_id)
+        github.check_opened_issues(release_version)
         if not dry_run:
             print('  Running maven builds now and publish to sonatype - run-tests [%s]' % run_tests)
         else:
@@ -870,7 +840,7 @@ if __name__ == '__main__':
         print('  publish artifacts to S3 -- dry_run: %s' % dry_run)
         publish_artifacts(artifact_and_checksums, base='elasticsearch/%s' % (artifact_id) , dry_run=dry_run)
         print('  preparing email (from github issues)')
-        msg = prepare_email(artifact_id, release_version, repository, artifact_name, artifact_description, project_url)
+        msg = prepare_email(artifact_id, release_version, artifact_name, artifact_description, project_url)
         input('Press Enter to send email...')
         print('  sending email -- dry_run: %s, mail: %s' % (dry_run, mail))
         send_email(msg, dry_run=dry_run, mail=mail)
