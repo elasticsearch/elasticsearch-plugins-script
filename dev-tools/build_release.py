@@ -31,6 +31,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from os.path import dirname, abspath
+from logger import logger
 
 """
  This tool builds a release from the a given elasticsearch plugin branch.
@@ -74,7 +75,6 @@ Once it's done it will print all the remaining steps.
 """
 env = os.environ
 
-LOG = env.get('ES_RELEASE_LOG', '/tmp/elasticsearch_release.log')
 ROOT_DIR = abspath(os.path.join(abspath(dirname(__file__)), '../'))
 README_FILE = ROOT_DIR + '/README.md'
 POM_FILE = ROOT_DIR + '/pom.xml'
@@ -90,31 +90,11 @@ FAIL = '\033[91m'
 # Utility methods (log and run)
 #
 ##########################################################
-# Log a message
-def log(msg):
-    log_plain('\n%s' % msg)
-
-
-# Purge the log file
-def purge_log():
-    try:
-        os.remove(LOG)
-    except FileNotFoundError:
-        pass
-
-
-# Log a message to the LOG file
-def log_plain(msg):
-    f = open(LOG, mode='ab')
-    f.write(msg.encode('utf-8'))
-    f.close()
-
-
 # Run a command and log it
 def run(command, quiet=False):
-    log('%s: RUN: %s\n' % (datetime.datetime.now(), command))
-    if os.system('%s >> %s 2>&1' % (command, LOG)):
-        msg = '    FAILED: %s [see log %s]' % (command, LOG)
+    logger.log('%s: RUN: %s\n' % (datetime.datetime.now(), command))
+    if os.system('%s >> %s 2>&1' % (command, logger.LOG)):
+        msg = '    FAILED: %s [see log %s]' % (command, logger.LOG)
         if not quiet:
             print(msg)
         raise RuntimeError(msg)
@@ -125,7 +105,7 @@ def run(command, quiet=False):
 #
 ##########################################################
 try:
-    purge_log()
+    logger.purge_log()
     JAVA_HOME = env['JAVA_HOME']
 except KeyError:
     raise RuntimeError("""
@@ -532,7 +512,7 @@ def list_issues(version,
 
 def read_email_template(format='html'):
     file_name = '%s/email_template.%s' % (DEV_TOOLS_DIR, format)
-    log('open email template %s' % file_name)
+    logger.log('open email template %s' % file_name)
     with open(file_name, encoding='utf-8') as template_file:
         data = template_file.read()
     return data
@@ -672,7 +652,7 @@ def check_s3_credentials():
 
 def check_github_credentials():
     if not env.get('GITHUB_KEY', None) and not env.get('GITHUB_LOGIN', None):
-        log(
+        logger.log(
             'WARN: Could not find "GITHUB_LOGIN" / "GITHUB_PASSWORD" or "GITHUB_KEY" in the env variables. You could need it.')
 
 
@@ -829,9 +809,7 @@ if __name__ == '__main__':
         create_release_branch(remote, src_branch, release_version)
         print('  Created release branch [%s]' % (release_branch(src_branch, release_version)))
     except RuntimeError:
-        print('Logs:')
-        with open(LOG, 'r') as log_file:
-            print(log_file.read())
+        logger.print_log()
         sys.exit(-1)
 
     success = False
@@ -909,9 +887,7 @@ Release successful pending steps:
         success = True
     finally:
         if not success:
-            print('Logs:')
-            with open(LOG, 'r') as log_file:
-                print(log_file.read())
+            logger.print_log()
             git_checkout('master')
             run('git reset --hard %s' % master_hash)
             git_checkout(src_branch)
