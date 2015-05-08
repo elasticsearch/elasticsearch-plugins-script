@@ -16,7 +16,6 @@
 
 import re
 import os
-import datetime
 import argparse
 import subprocess
 import sys
@@ -25,9 +24,11 @@ from functools import partial
 
 from os.path import dirname, abspath
 from release.logger import logger
-from release.github import github
+from release.git import github
+from release.git import git
 from release.announcement import announcement
 from release.utils import strings
+from release.utils import run
 from release.documentation import doc_update
 
 """
@@ -83,19 +84,6 @@ OKWARN = '\033[93m'
 ENDC = '\033[0m'
 FAIL = '\033[91m'
 
-##########################################################
-#
-# Utility methods (log and run)
-#
-##########################################################
-# Run a command and log it
-def run(command, quiet=False):
-    logger.log('%s: RUN: %s\n' % (datetime.datetime.now(), command))
-    if os.system('%s >> %s 2>&1' % (command, logger.LOG)):
-        msg = '    FAILED: %s [see log %s]' % (command, logger.LOG)
-        if not quiet:
-            print(msg)
-        raise RuntimeError(msg)
 
 ##########################################################
 #
@@ -114,7 +102,7 @@ try:
     MVN = 'mvn'
     # make sure mvn3 is used if mvn3 is available
     # some systems use maven 2 as default
-    run('mvn3 --version', quiet=True)
+    run.run('mvn3 --version', quiet=True)
     MVN = 'mvn3'
 except RuntimeError:
     pass
@@ -142,11 +130,6 @@ def verify_mvn_java_version(version, mvn):
 # String and file manipulation utils
 #
 ##########################################################
-# Utility that returns the name of the release branch for a given version
-def release_branch(branchsource, version):
-    return 'release_branch_%s_%s' % (branchsource, version)
-
-
 # Guess the next snapshot version number (increment last digit)
 def guess_snapshot(version):
     digits = strings.split_version_to_digits(version)
@@ -160,7 +143,7 @@ def guess_snapshot(version):
 # if the version is already on a release version we fail.
 # Returns the next version string ie. 0.90.7
 def find_release_version(src_branch):
-    git_checkout(src_branch)
+    git.checkout(src_branch)
     with open(POM_FILE, encoding='utf-8') as file:
         for line in file:
             match = re.search(r'<version>(.+)-SNAPSHOT</version>', line)
@@ -216,81 +199,6 @@ def generate_checksums(release_file):
     return res
 
 
-##########################################################
-#
-# GIT commands
-#
-##########################################################
-# Returns the hash of the current git HEAD revision
-def get_head_hash():
-    return os.popen('git rev-parse --verify HEAD 2>&1').read().strip()
-
-
-# Returns the name of the current branch
-def get_current_branch():
-    return os.popen('git rev-parse --abbrev-ref HEAD  2>&1').read().strip()
-
-
-# runs get fetch on the given remote
-def fetch(remote):
-    run('git fetch %s' % remote)
-
-
-# Creates a new release branch from the given source branch
-# and rebases the source branch from the remote before creating
-# the release branch. Note: This fails if the source branch
-# doesn't exist on the provided remote.
-def create_release_branch(remote, src_branch, release):
-    git_checkout(src_branch)
-    run('git pull --rebase %s %s' % (remote, src_branch))
-    run('git checkout -b %s' % (release_branch(src_branch, release)))
-
-
-# Stages the given files for the next git commit
-def add_pending_files(*files):
-    for file in files:
-        run('git add %s' % file)
-
-
-# Executes a git commit with 'release [version]' as the commit message
-def commit_release(artifact_id, release):
-    run('git commit -m "prepare release %s-%s"' % (artifact_id, release))
-
-
-# Commit documentation changes on the master branch
-def commit_master(release):
-    run('git commit -m "update documentation with release %s"' % release)
-
-
-# Commit next snapshot files
-def commit_snapshot():
-    run('git commit -m "prepare for next development iteration"')
-
-
-# Put the version tag on on the current commit
-def tag_release(release):
-    run('git tag -a v%s -m "Tag release version %s"' % (release, release))
-
-
-# Checkout a given branch
-def git_checkout(branch):
-    run('git checkout %s' % branch)
-
-
-# Merge the release branch with the actual branch
-def git_merge(src_branch, release_version):
-    git_checkout(src_branch)
-    run('git merge %s' % release_branch(src_branch, release_version))
-
-
-# Push the actual branch and master branch
-def git_push(remote, src_branch, release_version, dry_run):
-    if not dry_run:
-        run('git push %s %s master' % (remote, src_branch))  # push the commit and the master
-        run('git push %s v%s' % (remote, release_version))  # push the tag
-    else:
-        print('  dryrun [True] -- skipping push to remote %s %s master' % (remote, src_branch))
-
 
 ##########################################################
 #
@@ -300,7 +208,7 @@ def git_push(remote, src_branch, release_version, dry_run):
 # Run a given maven command
 def run_mvn(*cmd):
     for c in cmd:
-        run('%s; %s -f %s %s' % (java_exe(), MVN, POM_FILE, c))
+        run.run('%s; %s -f %s %s' % (java_exe(), MVN, POM_FILE, c))
 
 
 # Run deploy or package depending on dry_run
@@ -330,7 +238,7 @@ def publish_artifacts(artifacts, base='elasticsearch/elasticsearch', dry_run=Tru
         else:
             print('Uploading %s to Amazon S3' % artifact)
             # requires boto to be installed but it is not available on python3k yet so we use a dedicated tool
-            run('python %s/upload-s3.py --file %s --path %s' % (location, os.path.abspath(artifact), base))
+            run.run('python %s/upload-s3.py --file %s --path %s' % (location, os.path.abspath(artifact), base))
 
 
 def print_sonatype_notice():
@@ -436,7 +344,7 @@ def check_environment_and_commandline_tools():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Builds and publishes a Elasticsearch Plugin Release')
-    parser.add_argument('--branch', '-b', metavar='master', default=get_current_branch(),
+    parser.add_argument('--branch', '-b', metavar='master', default=git.get_current_branch(),
                         help='The branch to release from. Defaults to the current branch.')
     parser.add_argument('--skiptests', '-t', dest='tests', action='store_false',
                         help='Skips tests before release. Tests are run by default.')
@@ -517,15 +425,15 @@ if __name__ == '__main__':
         smoke_test_version = release_version
 
     try:
-        git_checkout('master')
-        master_hash = get_head_hash()
-        git_checkout(src_branch)
-        version_hash = get_head_hash()
+        git.checkout('master')
+        master_hash = git.get_head_hash()
+        git.checkout(src_branch)
+        version_hash = git.get_head_hash()
         run_mvn('clean')  # clean the env!
-        create_release_branch(remote, 'master', release_version)
-        print('  Created release branch [%s]' % (release_branch('master', release_version)))
-        create_release_branch(remote, src_branch, release_version)
-        print('  Created release branch [%s]' % (release_branch(src_branch, release_version)))
+        git.create_release_branch(remote, 'master', release_version)
+        print('  Created release branch [%s]' % (git.release_branch('master', release_version)))
+        git.create_release_branch(remote, src_branch, release_version)
+        print('  Created release branch [%s]' % (git.release_branch(src_branch, release_version)))
     except RuntimeError:
         logger.print_log()
         sys.exit(-1)
@@ -539,8 +447,8 @@ if __name__ == '__main__':
         doc_update.remove_maven_snapshot(POM_FILE, release_version)
         doc_update.update_documentation_in_released_branch(README_FILE, release_version, elasticsearch_version)
         print('  Done removing snapshot version')
-        add_pending_files(*pending_files)  # expects var args use * to expand
-        commit_release(artifact_id, release_version)
+        git.add_pending_files(*pending_files)  # expects var args use * to expand
+        git.commit_release(artifact_id, release_version)
         print('  Committed release version [%s]' % release_version)
         print(''.join(['-' for _ in range(80)]))
         print('Building Release candidate')
@@ -560,31 +468,31 @@ if __name__ == '__main__':
         ########################################
         # Start update process in master branch
         ########################################
-        git_checkout(release_branch('master', release_version))
+        git.checkout(release_branch('master', release_version))
         doc_update.update_documentation_to_released_version(README_FILE, project_url, release_version, src_branch,
                                                  elasticsearch_version)
         doc_update.set_install_instructions(README_FILE, artifact_id, release_version)
-        add_pending_files(*pending_files)  # expects var args use * to expand
-        commit_master(release_version)
+        git.add_pending_files(*pending_files)  # expects var args use * to expand
+        git.commit_master(release_version)
 
         print('Finish Release -- dry_run: %s' % dry_run)
         input('Press Enter to continue...')
 
         print('  merge release branch')
-        git_merge(src_branch, release_version)
+        git.merge(src_branch, release_version)
         print('  tag')
-        tag_release(release_version)
+        git.tag_release(release_version)
 
         doc_update.add_maven_snapshot(POM_FILE, release_version, snapshot_version)
         doc_update.update_documentation_in_released_branch(README_FILE, '%s-SNAPSHOT' % snapshot_version, elasticsearch_version)
-        add_pending_files(*pending_files)
-        commit_snapshot()
+        git.add_pending_files(*pending_files)
+        git.commit_snapshot()
 
         print('  merge master branch')
-        git_merge('master', release_version)
+        git.merge('master', release_version)
 
         print('  push to %s %s -- dry_run: %s' % (remote, src_branch, dry_run))
-        git_push(remote, src_branch, release_version, dry_run)
+        git.push(remote, src_branch, release_version, dry_run)
         print('  publish artifacts to S3 -- dry_run: %s' % dry_run)
         publish_artifacts(artifact_and_checksums, base='elasticsearch/%s' % (artifact_id) , dry_run=dry_run)
         print('  preparing email (from github issues)')
@@ -606,26 +514,26 @@ Release successful pending steps:
     finally:
         if not success:
             logger.print_log()
-            git_checkout('master')
-            run('git reset --hard %s' % master_hash)
-            git_checkout(src_branch)
-            run('git reset --hard %s' % version_hash)
+            git.checkout('master')
+            run.run('git reset --hard %s' % master_hash)
+            git.checkout(src_branch)
+            run.run('git reset --hard %s' % version_hash)
             try:
-                run('git tag -d v%s' % release_version)
+                run.run('git tag -d v%s' % release_version)
             except RuntimeError:
                 pass
         elif dry_run:
             print('End of dry_run')
             input('Press Enter to reset changes...')
-            git_checkout('master')
-            run('git reset --hard %s' % master_hash)
-            git_checkout(src_branch)
-            run('git reset --hard %s' % version_hash)
-            run('git tag -d v%s' % release_version)
+            git.checkout('master')
+            run.run('git reset --hard %s' % master_hash)
+            git.checkout(src_branch)
+            run.run('git reset --hard %s' % version_hash)
+            run.run('git tag -d v%s' % release_version)
 
         # we delete this one anyways
-        run('git branch -D %s' % (release_branch('master', release_version)))
-        run('git branch -D %s' % (release_branch(src_branch, release_version)))
+        run.run('git branch -D %s' % (release_branch('master', release_version)))
+        run.run('git branch -D %s' % (release_branch(src_branch, release_version)))
 
         # Checkout the branch we started from
-        git_checkout(src_branch)
+        git.checkout(src_branch)

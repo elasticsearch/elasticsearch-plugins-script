@@ -23,7 +23,7 @@ Depends on github3 module which must be installed first
 
 Usage
 
-from release.github import github
+from release.git import github
 
 # Define your repository using the "repository name"
 github.get_github_repository("elasticsearch")
