@@ -19,7 +19,7 @@ This module defines all the logging logic
 
 Usage example:
 
-from logger import logger
+from release.logger import logger
 
 logger.purge_log()
 logger.log("hello")

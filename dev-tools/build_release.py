@@ -20,18 +20,15 @@ import shutil
 import os
 import datetime
 import argparse
-import smtplib
 import subprocess
 import sys
 
 from functools import partial
 
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-
 from os.path import dirname, abspath
-from logger import logger
-from github import github
+from release.logger import logger
+from release.github import github
+from release.announcement import announcement
 
 """
  This tool builds a release from the a given elasticsearch plugin branch.
@@ -331,31 +328,6 @@ def generate_checksums(release_file):
     return res
 
 
-# Format a GitHub issue as plain text
-def format_issues_plain(issues, title='Fix'):
-    response = ""
-
-    if len(issues) > 0:
-        response += '%s:\n' % title
-        for issue in issues:
-            response += ' * [%s] - %s (%s)\n' % (issue.number, issue.title, issue.html_url)
-
-    return response
-
-
-# Format a GitHub issue as html text
-def format_issues_html(issues, title='Fix'):
-    response = ""
-
-    if len(issues) > 0:
-        response += '<h2>%s</h2>\n<ul>\n' % title
-        for issue in issues:
-            response += '<li>[<a href="%s">%s</a>] - %s\n' % (issue.html_url, issue.number, issue.title)
-        response += '</ul>\n'
-
-    return response
-
-
 ##########################################################
 #
 # GIT commands
@@ -473,114 +445,6 @@ def publish_artifacts(artifacts, base='elasticsearch/elasticsearch', dry_run=Tru
             run('python %s/upload-s3.py --file %s --path %s' % (location, os.path.abspath(artifact), base))
 
 
-##########################################################
-#
-# Email and Github Management
-#
-##########################################################
-def read_email_template(format='html'):
-    file_name = '%s/email_template.%s' % (DEV_TOOLS_DIR, format)
-    logger.log('open email template %s' % file_name)
-    with open(file_name, encoding='utf-8') as template_file:
-        data = template_file.read()
-    return data
-
-
-# Read template messages
-template_email_html = read_email_template('html')
-template_email_txt = read_email_template('txt')
-
-
-# Get issues from github and generates a Plain/HTML Multipart email
-def prepare_email(artifact_id, release_version,
-                  artifact_name, artifact_description, project_url,
-                  severity_labels_bug='bug',
-                  severity_labels_update='update',
-                  severity_labels_new='new',
-                  severity_labels_doc='doc'):
-    ## Get bugs from github
-    issues_bug = github.list_issues(release_version, severity=severity_labels_bug)
-    issues_update = github.list_issues(release_version, severity=severity_labels_update)
-    issues_new = github.list_issues(release_version, severity=severity_labels_new)
-    issues_doc = github.list_issues(release_version, severity=severity_labels_doc)
-
-    ## Format content to plain text
-    plain_issues_bug = format_issues_plain(issues_bug, 'Fix')
-    plain_issues_update = format_issues_plain(issues_update, 'Update')
-    plain_issues_new = format_issues_plain(issues_new, 'New')
-    plain_issues_doc = format_issues_plain(issues_doc, 'Doc')
-
-    ## Format content to html
-    html_issues_bug = format_issues_html(issues_bug, 'Fix')
-    html_issues_update = format_issues_html(issues_update, 'Update')
-    html_issues_new = format_issues_html(issues_new, 'New')
-    html_issues_doc = format_issues_html(issues_doc, 'Doc')
-
-    if len(issues_bug) + len(issues_update) + len(issues_new) + len(issues_doc) > 0:
-        plain_empty_message = ""
-        html_empty_message = ""
-
-    else:
-        plain_empty_message = "No issue listed for this release"
-        html_empty_message = "<p>No issue listed for this release</p>"
-
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = '[ANN] %s %s released' % (artifact_name, release_version)
-    text = template_email_txt % {'release_version': release_version,
-                                 'artifact_id': artifact_id,
-                                 'artifact_name': artifact_name,
-                                 'artifact_description': artifact_description,
-                                 'project_url': project_url,
-                                 'empty_message': plain_empty_message,
-                                 'issues_bug': plain_issues_bug,
-                                 'issues_update': plain_issues_update,
-                                 'issues_new': plain_issues_new,
-                                 'issues_doc': plain_issues_doc}
-
-    html = template_email_html % {'release_version': release_version,
-                                  'artifact_id': artifact_id,
-                                  'artifact_name': artifact_name,
-                                  'artifact_description': artifact_description,
-                                  'project_url': project_url,
-                                  'empty_message': html_empty_message,
-                                  'issues_bug': html_issues_bug,
-                                  'issues_update': html_issues_update,
-                                  'issues_new': html_issues_new,
-                                  'issues_doc': html_issues_doc}
-
-    # Record the MIME types of both parts - text/plain and text/html.
-    part1 = MIMEText(text, 'plain')
-    part2 = MIMEText(html, 'html')
-
-    # Attach parts into message container.
-    # According to RFC 2046, the last part of a multipart message, in this case
-    # the HTML message, is best and preferred.
-    msg.attach(part1)
-    msg.attach(part2)
-
-    return msg
-
-
-def send_email(msg,
-               dry_run=True,
-               mail=True,
-               sender=env.get('MAIL_SENDER'),
-               to=env.get('MAIL_TO', 'discuss%2Bannouncements@elastic.co'),
-               smtp_server=env.get('SMTP_SERVER', 'localhost')):
-    msg['From'] = 'Elasticsearch Team <%s>' % sender
-    msg['To'] = 'Elasticsearch Announcement List <%s>' % to
-    # save mail on disk
-    with open(ROOT_DIR + '/target/email.txt', 'w') as email_file:
-        email_file.write(msg.as_string())
-    if mail and not dry_run:
-        s = smtplib.SMTP(smtp_server, 25)
-        s.sendmail(sender, to, msg.as_string())
-        s.quit()
-    else:
-        print('generated email: open %s/target/email.txt' % ROOT_DIR)
-        print(msg.as_string())
-
-
 def print_sonatype_notice():
     settings = os.path.join(os.path.expanduser('~'), '.m2/settings.xml')
     if os.path.isfile(settings):
@@ -616,11 +480,6 @@ def check_s3_credentials():
     if not env.get('AWS_ACCESS_KEY_ID', None) or not env.get('AWS_SECRET_ACCESS_KEY', None):
         raise RuntimeError(
             'Could not find "AWS_ACCESS_KEY_ID" / "AWS_SECRET_ACCESS_KEY" in the env variables please export in order to upload to S3')
-
-
-def check_email_settings():
-    if not env.get('MAIL_SENDER', None):
-        raise RuntimeError('Could not find "MAIL_SENDER"')
 
 
 def check_command_exists(name, cmd):
@@ -661,6 +520,9 @@ def check_environment_and_commandline_tools():
     check_env_var('Checking for Github env configuration GITHUB_LOGIN...              ', 'GITHUB_LOGIN', True)
     check_env_var('Checking for Github env configuration GITHUB_PASSWORD...           ', 'GITHUB_PASSWORD', True)
     check_env_var('Checking for Github env configuration GITHUB_KEY...                ', 'GITHUB_KEY', True)
+    check_env_var('Checking for Email settings MAIL_SENDER...                         ', 'MAIL_SENDER')
+    check_env_var('Checking for Email settings MAIL_TO...                             ', 'MAIL_TO', True)
+    check_env_var('Checking for Email settings SMTP_SERVER...                         ', 'SMTP_SERVER', True)
     # check_env_var('Checking for SONATYPE env configuration SONATYPE_USERNAME...       ', 'SONATYPE_USERNAME')
     # check_env_var('Checking for SONATYPE env configuration SONATYPE_PASSWORD...       ', 'SONATYPE_PASSWORD')
     # check_env_var('Checking for GPG env configuration GPG_KEY_ID...                   ', 'GPG_KEY_ID')
@@ -671,8 +533,7 @@ def check_environment_and_commandline_tools():
 
     run_and_print('Checking command: gpg...            ', partial(check_command_exists, 'gpg', 'gpg --version'))
     run_and_print('Checking command: expect...         ', partial(check_command_exists, 'expect', 'expect -v'))
-    # run_and_print('Checking c
-    # ommand: createrepo...     ', partial(check_command_exists, 'createrepo', 'createrepo --version'))
+    # run_and_print('Checking command: createrepo...     ', partial(check_command_exists, 'createrepo', 'createrepo --version'))
     run_and_print('Checking command: s3cmd...          ', partial(check_command_exists, 's3cmd', 's3cmd --version'))
     # run_and_print('Checking command: apt-ftparchive... ', partial(check_command_exists, 'apt-ftparchive', 'apt-ftparchive --version'))
 
@@ -840,10 +701,10 @@ if __name__ == '__main__':
         print('  publish artifacts to S3 -- dry_run: %s' % dry_run)
         publish_artifacts(artifact_and_checksums, base='elasticsearch/%s' % (artifact_id) , dry_run=dry_run)
         print('  preparing email (from github issues)')
-        msg = prepare_email(artifact_id, release_version, artifact_name, artifact_description, project_url)
+        msg = announcement.prepare_email(artifact_id, release_version, artifact_name, artifact_description, project_url)
         input('Press Enter to send email...')
         print('  sending email -- dry_run: %s, mail: %s' % (dry_run, mail))
-        send_email(msg, dry_run=dry_run, mail=mail)
+        announcement.send_email(msg, dry_run=dry_run, mail=mail)
 
         pending_msg = """
 Release successful pending steps:
