@@ -15,8 +15,6 @@
 # language governing permissions and limitations under the License.
 
 import re
-import tempfile
-import shutil
 import os
 import datetime
 import argparse
@@ -29,6 +27,8 @@ from os.path import dirname, abspath
 from release.logger import logger
 from release.github import github
 from release.announcement import announcement
+from release.utils import strings
+from release.documentation import doc_update
 
 """
  This tool builds a release from the a given elasticsearch plugin branch.
@@ -147,124 +147,12 @@ def release_branch(branchsource, version):
     return 'release_branch_%s_%s' % (branchsource, version)
 
 
-# Reads the given file and applies the
-# callback to it. If the callback changed
-# a line the given file is replaced with
-# the modified input.
-def process_file(file_path, line_callback):
-    fh, abs_path = tempfile.mkstemp()
-    modified = False
-    with open(abs_path, 'w', encoding='utf-8') as new_file:
-        with open(file_path, encoding='utf-8') as old_file:
-            for line in old_file:
-                new_line = line_callback(line)
-                modified = modified or (new_line != line)
-                new_file.write(new_line)
-    os.close(fh)
-    if modified:
-        #Remove original file
-        os.remove(file_path)
-        #Move new file
-        shutil.move(abs_path, file_path)
-        return True
-    else:
-        # nothing to do - just remove the tmp file
-        os.remove(abs_path)
-        return False
-
-
-# Split a version x.y.z as an array of digits [x,y,z]
-def split_version_to_digits(version):
-    return list(map(int, re.findall(r'\d+', version)))
-
-
 # Guess the next snapshot version number (increment last digit)
 def guess_snapshot(version):
-    digits = split_version_to_digits(version)
+    digits = strings.split_version_to_digits(version)
     source = '%s.%s.%s' % (digits[0], digits[1], digits[2])
     destination = '%s.%s.%s' % (digits[0], digits[1], digits[2] + 1)
     return version.replace(source, destination)
-
-
-# Guess the anchor in generated documentation
-# Looks like this "#version-230-for-elasticsearch-13"
-def get_doc_anchor(release, esversion):
-    plugin_digits = split_version_to_digits(release)
-    es_digits = split_version_to_digits(esversion)
-    return '#version-%s%s%s-for-elasticsearch-%s%s' % (
-        plugin_digits[0], plugin_digits[1], plugin_digits[2], es_digits[0], es_digits[1])
-
-
-# Moves the pom.xml file from a snapshot to a release
-def remove_maven_snapshot(pom, release):
-    pattern = '<version>%s-SNAPSHOT</version>' % release
-    replacement = '<version>%s</version>' % release
-
-    def callback(line):
-        return line.replace(pattern, replacement)
-
-    process_file(pom, callback)
-
-
-# Moves the pom.xml file to the next snapshot
-def add_maven_snapshot(pom, release, snapshot):
-    pattern = '<version>%s</version>' % release
-    replacement = '<version>%s-SNAPSHOT</version>' % snapshot
-
-    def callback(line):
-        return line.replace(pattern, replacement)
-
-    process_file(pom, callback)
-
-
-# Moves the README.md file from a snapshot to a release version. Doc looks like:
-# ## Version 2.5.0-SNAPSHOT for Elasticsearch: 1.x
-# It needs to be updated to
-# ## Version 2.5.0 for Elasticsearch: 1.x
-def update_documentation_in_released_branch(readme_file, release, esversion):
-    pattern = '## Version (.)+ for Elasticsearch: (.)+'
-    es_digits = split_version_to_digits(esversion)
-    replacement = '## Version %s for Elasticsearch: %s.%s\n' % (
-        release, es_digits[0], es_digits[1])
-
-    def callback(line):
-        # If we find pattern, we replace its content
-        if re.search(pattern, line) is not None:
-            return replacement
-        else:
-            return line
-
-    process_file(readme_file, callback)
-
-
-# Moves the README.md file from a snapshot to a release (documentation link)
-# We need to find the right branch we are on and update the line
-#        |    es-1.3              | Build from source | [2.4.0-SNAPSHOT](https://github.com/elasticsearch/elasticsearch-cloud-azure/tree/es-1.3/#version-240-snapshot-for-elasticsearch-13)     |
-#        |    es-1.2              |     2.3.0         | [2.3.0](https://github.com/elasticsearch/elasticsearch-cloud-azure/tree/v2.3.0/#version-230-snapshot-for-elasticsearch-13)              |
-def update_documentation_to_released_version(readme_file, repo_url, release, branch, esversion):
-    pattern = '%s' % branch
-    replacement = '|    %s              |     %s         | [%s](%stree/v%s/%s)                  |\n' % (
-        branch, release, release, repo_url, release, get_doc_anchor(release, esversion))
-
-    def callback(line):
-        # If we find pattern, we replace its content
-        if line.find(pattern) >= 0:
-            return replacement
-        else:
-            return line
-
-    process_file(readme_file, callback)
-
-
-# Update installation instructions in README.md file
-def set_install_instructions(readme_file, artifact_name, release):
-    pattern = 'bin/plugin -?install elasticsearch/%s/.+' % artifact_name
-    replacement = 'bin/plugin install elasticsearch/%s/%s' % (artifact_name, release)
-
-    def callback(line):
-        return re.sub(pattern, replacement, line)
-
-    process_file(readme_file, callback)
 
 
 # Checks the pom.xml for the release version. <version>2.0.0-SNAPSHOT</version>
@@ -587,7 +475,6 @@ if __name__ == '__main__':
         check_s3_credentials()
         print('WARNING: dryrun is set to "false" - this will push and publish the release')
         if mail:
-            check_email_settings()
             print('An email to %s will be sent after the release'
                   % env.get('MAIL_TO', 'discuss%2Bannouncements@elastic.co'))
         input('Press Enter to continue...')
@@ -649,8 +536,8 @@ if __name__ == '__main__':
         # Start update process in version branch
         ########################################
         pending_files = [POM_FILE, README_FILE]
-        remove_maven_snapshot(POM_FILE, release_version)
-        update_documentation_in_released_branch(README_FILE, release_version, elasticsearch_version)
+        doc_update.remove_maven_snapshot(POM_FILE, release_version)
+        doc_update.update_documentation_in_released_branch(README_FILE, release_version, elasticsearch_version)
         print('  Done removing snapshot version')
         add_pending_files(*pending_files)  # expects var args use * to expand
         commit_release(artifact_id, release_version)
@@ -674,9 +561,9 @@ if __name__ == '__main__':
         # Start update process in master branch
         ########################################
         git_checkout(release_branch('master', release_version))
-        update_documentation_to_released_version(README_FILE, project_url, release_version, src_branch,
+        doc_update.update_documentation_to_released_version(README_FILE, project_url, release_version, src_branch,
                                                  elasticsearch_version)
-        set_install_instructions(README_FILE, artifact_id, release_version)
+        doc_update.set_install_instructions(README_FILE, artifact_id, release_version)
         add_pending_files(*pending_files)  # expects var args use * to expand
         commit_master(release_version)
 
@@ -688,8 +575,8 @@ if __name__ == '__main__':
         print('  tag')
         tag_release(release_version)
 
-        add_maven_snapshot(POM_FILE, release_version, snapshot_version)
-        update_documentation_in_released_branch(README_FILE, '%s-SNAPSHOT' % snapshot_version, elasticsearch_version)
+        doc_update.add_maven_snapshot(POM_FILE, release_version, snapshot_version)
+        doc_update.update_documentation_in_released_branch(README_FILE, '%s-SNAPSHOT' % snapshot_version, elasticsearch_version)
         add_pending_files(*pending_files)
         commit_snapshot()
 
