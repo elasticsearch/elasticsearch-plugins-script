@@ -28,6 +28,7 @@ from release.git import github
 from release.git import git
 from release.announcement import announcement
 from release.utils import run
+from release.utils import checksums
 from release.documentation import doc_update
 from release.maven import mvn
 
@@ -105,22 +106,6 @@ def get_artifacts(artifact_id, release):
     if not os.path.isfile(artifact_path):
         raise RuntimeError('Could not find required artifact at %s' % artifact_path)
     return artifact_path
-
-
-# Generates sha1 for a file
-# and returns the checksum files as well
-# as the given files in a list
-def generate_checksums(release_file):
-    res = []
-    directory = os.path.dirname(release_file)
-    file = os.path.basename(release_file)
-    checksum_file = '%s.sha1.txt' % file
-
-    if os.system('cd %s; shasum %s > %s' % (directory, file, checksum_file)):
-        raise RuntimeError('Failed to generate checksum for file %s' % release_file)
-    res += [os.path.join(directory, checksum_file), release_file]
-    return res
-
 
 
 ##########################################################
@@ -362,7 +347,7 @@ if __name__ == '__main__':
             print('  Running maven builds now run-tests [%s]' % run_tests)
         mvn.build_release(run_tests=run_tests, dry_run=dry_run)
         artifact = get_artifacts(artifact_id, release_version)
-        artifact_and_checksums = generate_checksums(artifact)
+        artifact_and_checksums = checksums.generate_checksums(artifact)
         print(''.join(['-' for _ in range(80)]))
 
         ########################################
