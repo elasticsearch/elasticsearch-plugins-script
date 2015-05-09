@@ -65,7 +65,7 @@ def check_env_var(text, env_var, optional=False):
 
 
 def check_environment_and_commandline_tools():
-    check_env_var('Checking for AWS env configuration AWS_SECRET_ACCESS_KEY_ID...     ', 'AWS_SECRET_ACCESS_KEY')
+    check_env_var('Checking for AWS env configuration AWS_SECRET_ACCESS_KEY...        ', 'AWS_SECRET_ACCESS_KEY')
     check_env_var('Checking for AWS env configuration AWS_ACCESS_KEY_ID...            ', 'AWS_ACCESS_KEY_ID')
     check_env_var('Checking for Github env configuration GITHUB_LOGIN...              ', 'GITHUB_LOGIN', True)
     check_env_var('Checking for Github env configuration GITHUB_PASSWORD...           ', 'GITHUB_PASSWORD', True)

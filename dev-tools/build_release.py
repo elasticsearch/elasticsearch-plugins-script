@@ -19,7 +19,6 @@ import argparse
 import sys
 
 
-from os.path import dirname, abspath
 from release.logger import logger
 from release.git import github
 from release.git import git
@@ -29,6 +28,8 @@ from release.utils import checksums
 from release.utils import envcheck
 from release.documentation import doc_update
 from release.maven import mvn
+from release.aws import s3
+from release import common
 
 """
  This tool builds a release from the a given elasticsearch plugin branch.
@@ -72,10 +73,9 @@ Once it's done it will print all the remaining steps.
 """
 env = os.environ
 
-ROOT_DIR = abspath(os.path.join(abspath(dirname(__file__)), '../'))
-README_FILE = ROOT_DIR + '/README.md'
-POM_FILE = ROOT_DIR + '/pom.xml'
-DEV_TOOLS_DIR = ROOT_DIR + '/plugin_tools'
+README_FILE = common.ROOT_DIR + '/README.md'
+POM_FILE = common.ROOT_DIR + '/pom.xml'
+DEV_TOOLS_DIR = common.ROOT_DIR + '/plugin_tools'
 
 
 ##########################################################
@@ -84,23 +84,6 @@ DEV_TOOLS_DIR = ROOT_DIR + '/plugin_tools'
 #
 ##########################################################
 logger.purge_log()
-
-
-##########################################################
-#
-# Amazon S3 publish commands
-#
-##########################################################
-# Upload files to S3
-def publish_artifacts(artifacts, base='elasticsearch/elasticsearch', dry_run=True):
-    location = os.path.dirname(os.path.realpath(__file__))
-    for artifact in artifacts:
-        if dry_run:
-            print('Skip Uploading %s to Amazon S3 in %s' % (artifact, base))
-        else:
-            print('Uploading %s to Amazon S3' % artifact)
-            # requires boto to be installed but it is not available on python3k yet so we use a dedicated tool
-            run.run('python %s/upload-s3.py --file %s --path %s' % (location, os.path.abspath(artifact), base))
 
 
 def print_sonatype_notice():
@@ -132,12 +115,6 @@ def print_sonatype_notice():
     ...
   </settings>
   """)
-
-
-def check_s3_credentials():
-    if not env.get('AWS_ACCESS_KEY_ID', None) or not env.get('AWS_SECRET_ACCESS_KEY', None):
-        raise RuntimeError(
-            'Could not find "AWS_ACCESS_KEY_ID" / "AWS_SECRET_ACCESS_KEY" in the env variables please export in order to upload to S3')
 
 
 if __name__ == '__main__':
@@ -178,8 +155,8 @@ if __name__ == '__main__':
     print_sonatype_notice()
 
     if not dry_run:
-        check_s3_credentials()
         print('WARNING: dryrun is set to "false" - this will push and publish the release')
+        print('make sure everything is set up correctly by running --check option!')
         if mail:
             print('An email to %s will be sent after the release'
                   % env.get('MAIL_TO', 'discuss%2Bannouncements@elastic.co'))
@@ -293,7 +270,7 @@ if __name__ == '__main__':
         print('  push to %s %s -- dry_run: %s' % (remote, src_branch, dry_run))
         git.push(remote, src_branch, release_version, dry_run)
         print('  publish artifacts to S3 -- dry_run: %s' % dry_run)
-        publish_artifacts(artifact_and_checksums, base='elasticsearch/%s' % (artifact_id) , dry_run=dry_run)
+        s3.publish_artifacts(artifact_and_checksums, base='elasticsearch/%s' % (artifact_id) , dry_run=dry_run)
         print('  preparing email (from github issues)')
         msg = announcement.prepare_email(artifact_id, release_version, artifact_name, artifact_description, project_url)
         input('Press Enter to send email...')

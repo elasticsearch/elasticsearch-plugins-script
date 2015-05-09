@@ -20,9 +20,9 @@ from os.path import dirname, abspath
 
 from ..utils import run
 from ..utils import strings
+from .. import common
 
-ROOT_DIR = abspath(os.path.join(abspath(dirname(__file__)), '../'))
-POM_FILE = ROOT_DIR + '/pom.xml'
+POM_FILE = common.ROOT_DIR + '/pom.xml'
 
 env = os.environ
 try:

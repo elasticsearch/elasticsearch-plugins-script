@@ -69,11 +69,11 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from ..logger import logger
+from .. import common
 
-ROOT_DIR = abspath(os.path.join(abspath(dirname(__file__)), '../../..'))
-DEV_TOOLS_DIR = ROOT_DIR + '/plugin_tools'
+DEV_TOOLS_DIR = common.ROOT_DIR + '/plugin_tools'
 DEFAULT_TEMPLATE_DIR = abspath(os.path.join(abspath(dirname(__file__)), 'templates'))
-USER_TEMPLATE_DIR = ROOT_DIR + '/dev-tools/templates'
+USER_TEMPLATE_DIR = common.ROOT_DIR + '/dev-tools/templates'
 
 DEFAULT_EMAIL_RECIPIENT = "discuss%2Bannouncements@elastic.co"
 
@@ -176,18 +176,19 @@ def send_email(msg,
                mail=True,
                sender=env.get('MAIL_SENDER'),
                to=env.get('MAIL_TO', DEFAULT_EMAIL_RECIPIENT),
-               smtp_server=env.get('SMTP_SERVER', 'localhost')):
+               smtp_server=env.get('SMTP_SERVER', 'localhost'),
+               file=common.ROOT_DIR + '/target/email.txt'):
     msg['From'] = 'Elasticsearch Team <%s>' % sender
     msg['To'] = 'Elasticsearch Announcement List <%s>' % to
     # save mail on disk
-    with open(ROOT_DIR + '/target/email.txt', 'w') as email_file:
+    with open(file, 'w') as email_file:
         email_file.write(msg.as_string())
     if mail and not dry_run:
         s = smtplib.SMTP(smtp_server, 25)
         s.sendmail(sender, to, msg.as_string())
         s.quit()
     else:
-        print('generated email: open %s/target/email.txt' % ROOT_DIR)
+        print('generated email: open %s' % file)
         print(msg.as_string())
 
 
