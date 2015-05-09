@@ -16,7 +16,6 @@
 
 import os
 import re
-from os.path import dirname, abspath
 
 from ..utils import run
 from ..utils import strings
@@ -129,7 +128,7 @@ def find_from_pom(tag, first_line=None):
 
 # Get artifacts which have been generated in target/releases
 def get_artifacts(artifact_id, release):
-    artifact_path = ROOT_DIR + '/target/releases/%s-%s.zip' % (artifact_id, release)
+    artifact_path = common.ROOT_DIR + '/target/releases/%s-%s.zip' % (artifact_id, release)
     print('  Path %s' % artifact_path)
     if not os.path.isfile(artifact_path):
         raise RuntimeError('Could not find required artifact at %s' % artifact_path)

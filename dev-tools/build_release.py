@@ -70,20 +70,12 @@ Once it's done it will print all the remaining steps.
 """
 env = os.environ
 
-README_FILE = common.ROOT_DIR + '/README.md'
-POM_FILE = common.ROOT_DIR + '/pom.xml'
 DEV_TOOLS_DIR = common.ROOT_DIR + '/plugin_tools'
 
 
-##########################################################
-#
-# Clean logs
-#
-##########################################################
-logger.purge_log()
-
-
 if __name__ == '__main__':
+    logger.purge_log()
+
     parser = argparse.ArgumentParser(description='Builds and publishes a Elasticsearch Plugin Release')
     parser.add_argument('--branch', '-b', metavar='master', default=git.get_current_branch(),
                         help='The branch to release from. Defaults to the current branch.')
@@ -185,9 +177,9 @@ if __name__ == '__main__':
         ########################################
         # Start update process in version branch
         ########################################
-        pending_files = [POM_FILE, README_FILE]
-        doc_update.remove_maven_snapshot(POM_FILE, release_version)
-        doc_update.update_documentation_in_released_branch(README_FILE, release_version, elasticsearch_version)
+        pending_files = [mvn.POM_FILE, doc_update.README_FILE]
+        doc_update.remove_maven_snapshot(release_version)
+        doc_update.update_documentation_in_released_branch(release_version, elasticsearch_version)
         print('  Done removing snapshot version')
         git.add_pending_files(*pending_files)  # expects var args use * to expand
         git.commit_release(artifact_id, release_version)
@@ -211,9 +203,9 @@ if __name__ == '__main__':
         # Start update process in master branch
         ########################################
         git.checkout(git.release_branch('master', release_version))
-        doc_update.update_documentation_to_released_version(README_FILE, project_url, release_version, src_branch,
-                                                 elasticsearch_version)
-        doc_update.set_install_instructions(README_FILE, artifact_id, release_version)
+        doc_update.update_documentation_to_released_version(project_url, release_version, src_branch,
+                                                            elasticsearch_version)
+        doc_update.set_install_instructions(artifact_id, release_version)
         git.add_pending_files(*pending_files)  # expects var args use * to expand
         git.commit_master(release_version)
 
@@ -225,8 +217,8 @@ if __name__ == '__main__':
         print('  tag')
         git.tag_release(release_version)
 
-        doc_update.add_maven_snapshot(POM_FILE, release_version, snapshot_version)
-        doc_update.update_documentation_in_released_branch(README_FILE, '%s-SNAPSHOT' % snapshot_version, elasticsearch_version)
+        doc_update.add_maven_snapshot(release_version, snapshot_version)
+        doc_update.update_documentation_in_released_branch('%s-SNAPSHOT' % snapshot_version, elasticsearch_version)
         git.add_pending_files(*pending_files)
         git.commit_snapshot()
 
@@ -236,9 +228,15 @@ if __name__ == '__main__':
         print('  push to %s %s -- dry_run: %s' % (remote, src_branch, dry_run))
         git.push(remote, src_branch, release_version, dry_run)
         print('  publish artifacts to S3 -- dry_run: %s' % dry_run)
-        s3.publish_artifacts(artifact_and_checksums, base='elasticsearch/%s' % (artifact_id) , dry_run=dry_run)
+        s3.publish_artifacts(artifact_and_checksums, base='elasticsearch/%s' % artifact_id, dry_run=dry_run)
         print('  preparing email (from github issues)')
-        msg = announcement.prepare_email(artifact_id, release_version, artifact_name, artifact_description, project_url)
+        msg = announcement.prepare_email(artifact_id, release_version,
+                                         artifact_name, artifact_description,
+                                         project_url,
+                                         github.list_issues(release_version, 'bug'),
+                                         github.list_issues(release_version, 'update'),
+                                         github.list_issues(release_version, 'new'),
+                                         github.list_issues(release_version, 'doc'))
         input('Press Enter to send email...')
         print('  sending email -- dry_run: %s, mail: %s' % (dry_run, mail))
         announcement.send_email(msg, dry_run=dry_run, mail=mail)

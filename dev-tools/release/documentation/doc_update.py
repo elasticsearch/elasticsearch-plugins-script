@@ -18,9 +18,14 @@ import re
 
 from ..fileupdater import updater
 from ..utils import strings
+from ..maven import mvn
+from .. import common
+
+
+README_FILE = common.ROOT_DIR + '/README.md'
 
 # Moves the pom.xml file from a snapshot to a release
-def remove_maven_snapshot(pom, release):
+def remove_maven_snapshot(release, pom = mvn.POM_FILE):
     pattern = '<version>%s-SNAPSHOT</version>' % release
     replacement = '<version>%s</version>' % release
 
@@ -31,7 +36,7 @@ def remove_maven_snapshot(pom, release):
 
 
 # Moves the pom.xml file to the next snapshot
-def add_maven_snapshot(pom, release, snapshot):
+def add_maven_snapshot(release, snapshot, pom = mvn.POM_FILE):
     pattern = '<version>%s</version>' % release
     replacement = '<version>%s-SNAPSHOT</version>' % snapshot
 
@@ -45,7 +50,7 @@ def add_maven_snapshot(pom, release, snapshot):
 # ## Version 2.5.0-SNAPSHOT for Elasticsearch: 1.x
 # It needs to be updated to
 # ## Version 2.5.0 for Elasticsearch: 1.x
-def update_documentation_in_released_branch(readme_file, release, esversion):
+def update_documentation_in_released_branch(release, esversion, readme_file=README_FILE):
     pattern = '## Version (.)+ for Elasticsearch: (.)+'
     es_digits = strings.split_version_to_digits(esversion)
     replacement = '## Version %s for Elasticsearch: %s.%s\n' % (
@@ -65,7 +70,7 @@ def update_documentation_in_released_branch(readme_file, release, esversion):
 # We need to find the right branch we are on and update the line
 #        |    es-1.3              | Build from source | [2.4.0-SNAPSHOT](https://github.com/elasticsearch/elasticsearch-cloud-azure/tree/es-1.3/#version-240-snapshot-for-elasticsearch-13)     |
 #        |    es-1.2              |     2.3.0         | [2.3.0](https://github.com/elasticsearch/elasticsearch-cloud-azure/tree/v2.3.0/#version-230-snapshot-for-elasticsearch-13)              |
-def update_documentation_to_released_version(readme_file, repo_url, release, branch, esversion):
+def update_documentation_to_released_version(repo_url, release, branch, esversion, readme_file=README_FILE):
     pattern = '%s' % branch
     replacement = '|    %s              |     %s         | [%s](%stree/v%s/%s)                  |\n' % (
         branch, release, release, repo_url, release, get_doc_anchor(release, esversion))
@@ -81,7 +86,7 @@ def update_documentation_to_released_version(readme_file, repo_url, release, bra
 
 
 # Update installation instructions in README.md file
-def set_install_instructions(readme_file, artifact_name, release):
+def set_install_instructions(artifact_name, release, readme_file=README_FILE):
     pattern = 'bin/plugin -?install elasticsearch/%s/.+' % artifact_name
     replacement = 'bin/plugin install elasticsearch/%s/%s' % (artifact_name, release)
 
