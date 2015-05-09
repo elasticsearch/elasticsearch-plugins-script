@@ -88,20 +88,6 @@ logger.purge_log()
 
 ##########################################################
 #
-# String and file manipulation utils
-#
-##########################################################
-# Get artifacts which have been generated in target/releases
-def get_artifacts(artifact_id, release):
-    artifact_path = ROOT_DIR + '/target/releases/%s-%s.zip' % (artifact_id, release)
-    print('  Path %s' % artifact_path)
-    if not os.path.isfile(artifact_path):
-        raise RuntimeError('Could not find required artifact at %s' % artifact_path)
-    return artifact_path
-
-
-##########################################################
-#
 # Amazon S3 publish commands
 #
 ##########################################################
@@ -274,7 +260,7 @@ if __name__ == '__main__':
         else:
             print('  Running maven builds now run-tests [%s]' % run_tests)
         mvn.build_release(run_tests=run_tests, dry_run=dry_run)
-        artifact = get_artifacts(artifact_id, release_version)
+        artifact = mvn.get_artifacts(artifact_id, release_version)
         artifact_and_checksums = checksums.generate_checksums(artifact)
         print(''.join(['-' for _ in range(80)]))
 
