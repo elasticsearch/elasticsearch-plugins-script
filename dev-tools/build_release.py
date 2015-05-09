@@ -19,17 +19,14 @@ import argparse
 import sys
 
 
-from release.logger import logger
-from release.git import github
-from release.git import git
-from release.announcement import announcement
-from release.utils import run
-from release.utils import checksums
-from release.utils import envcheck
-from release.documentation import doc_update
-from release.maven import mvn
-from release.aws import s3
 from release import common
+from release.logger import logger
+from release.git import github, git
+from release.announcement import announcement
+from release.utils import run, checksums, envcheck
+from release.documentation import doc_update
+from release.maven import mvn, sonatype
+from release.aws import s3
 
 """
  This tool builds a release from the a given elasticsearch plugin branch.
@@ -86,37 +83,6 @@ DEV_TOOLS_DIR = common.ROOT_DIR + '/plugin_tools'
 logger.purge_log()
 
 
-def print_sonatype_notice():
-    settings = os.path.join(os.path.expanduser('~'), '.m2/settings.xml')
-    if os.path.isfile(settings):
-        with open(settings, encoding='utf-8') as settings_file:
-            for line in settings_file:
-                if line.strip() == '<id>sonatype-nexus-snapshots</id>':
-                    # moving out - we found the indicator no need to print the warning
-                    return
-    print("""
-    NOTE: No sonatype settings detected, make sure you have configured
-    your sonatype credentials in '~/.m2/settings.xml':
-
-    <settings>
-    ...
-    <servers>
-      <server>
-        <id>sonatype-nexus-snapshots</id>
-        <username>your-jira-id</username>
-        <password>your-jira-pwd</password>
-      </server>
-      <server>
-        <id>sonatype-nexus-staging</id>
-        <username>your-jira-id</username>
-        <password>your-jira-pwd</password>
-      </server>
-    </servers>
-    ...
-  </settings>
-  """)
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Builds and publishes a Elasticsearch Plugin Release')
     parser.add_argument('--branch', '-b', metavar='master', default=git.get_current_branch(),
@@ -152,7 +118,7 @@ if __name__ == '__main__':
         raise RuntimeError('Can not release the master branch. You need to create another branch before a release')
 
     # we print a notice if we can not find the relevant infos in the ~/.m2/settings.xml
-    print_sonatype_notice()
+    sonatype.print_notice()
 
     if not dry_run:
         print('WARNING: dryrun is set to "false" - this will push and publish the release')
